@@ -52,7 +52,7 @@ app.post('/webhook', async (req, res) => {
     const reminderMinutes = Math.round((nextDay9am.getTime() - now.getTime()) / 60_000);
 
     const event = {
-      summary: '🌿 New HTMA Inquiry — check Ivorey!',
+      summary: '🌿 New Health Coaching Inquiry — check Ivorey!',
       description: [
         'Someone new found their way to you. 🌱',
         '',
