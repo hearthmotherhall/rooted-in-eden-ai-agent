@@ -1,6 +1,13 @@
 # Ivorey → Google Calendar Webhook
 
-When someone submits the **Holistic Well Woman Care - Virtual** form in GoHighLevel (Ivorey.io), this server receives the webhook and instantly creates a lavender-colored reminder event on `rootedinedenpma@gmail.com`.
+This server handles three automations for Rooted in Eden:
+
+| Trigger | Endpoint | What it creates |
+|---------|----------|-----------------|
+| New inquiry form submitted | `POST /webhook` | Lavender event now; popup reminder next day 9am |
+| HTMA payment + contract complete | `POST /webhook/htma-payment` | Lavender event next business day 9am |
+| 3 or 6 month follow-up | `POST /webhook/htma-followup` | Lavender event same day 9am |
+| Email from `reports@traceelements.com` | *(auto, every 15 min)* | Sage/green event next day 9am |
 
 ---
 
@@ -16,7 +23,9 @@ When someone submits the **Holistic Well Woman Care - Virtual** form in GoHighLe
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com) and sign in as `rootedinedenpma@gmail.com`.
 2. Click **Select a project** → **New Project**. Name it something like `ivorey-webhook`.
-3. In the left sidebar go to **APIs & Services → Library**. Search for **Google Calendar API** and click **Enable**.
+3. In the left sidebar go to **APIs & Services → Library**. Search for and enable both:
+   - **Google Calendar API**
+   - **Gmail API**
 4. Go to **APIs & Services → OAuth consent screen**.
    - Choose **External**, click **Create**.
    - Fill in App name (e.g. `Ivorey Webhook`), your email for support, and your email again for developer contact.
@@ -55,17 +64,19 @@ TIMEZONE=America/New_York   # change to your timezone if needed
 
 ## Step 3 — Get your refresh token (one-time)
 
+> **If you already ran this before:** the scopes have changed (Gmail was added), so you must run it again to get a new token that covers both Calendar and Gmail.
+
 ```bash
 npm run auth
 ```
 
-The script prints a URL. Open it in your browser and sign in as `rootedinedenpma@gmail.com`. After authorizing, your terminal will print:
+The script prints a URL. Open it in your browser and sign in as `rootedinedenpma@gmail.com`. Google will ask you to grant access to both **Calendar** and **Gmail (read-only)**. After authorizing, your terminal will print:
 
 ```
 GOOGLE_REFRESH_TOKEN=1//0g...
 ```
 
-Copy that value and add it to `.env`:
+Copy that value and add it to `.env` (replacing any previous token):
 
 ```
 GOOGLE_REFRESH_TOKEN=paste_token_here
@@ -79,15 +90,32 @@ GOOGLE_REFRESH_TOKEN=paste_token_here
 node index.js
 ```
 
-In a second terminal, send a test webhook:
+On first start the Gmail watcher seeds itself (marks all existing TEI emails as already processed — no calendar spam). You'll see a log line confirming this.
 
+In a second terminal, test each endpoint:
+
+**New inquiry:**
 ```bash
 curl -X POST http://localhost:3000/webhook \
   -H "Content-Type: application/json" \
-  -d '{"formName":"Holistic Well Woman Care - Virtual","test":true}'
+  -d '{"test":true}'
 ```
 
-Check your Google Calendar — a lavender event should appear immediately with a popup reminder for the following day at 9 am.
+**HTMA payment:**
+```bash
+curl -X POST http://localhost:3000/webhook/htma-payment \
+  -H "Content-Type: application/json" \
+  -d '{"service":"htma","contact":{"name":"Jane Smith"}}'
+```
+
+**3-month follow-up:**
+```bash
+curl -X POST http://localhost:3000/webhook/htma-followup \
+  -H "Content-Type: application/json" \
+  -d '{"months":3,"contact":{"name":"Jane Smith"}}'
+```
+
+Check your Google Calendar after each — events should appear at the expected times.
 
 ---
 
@@ -107,18 +135,25 @@ Check your Google Calendar — a lavender event should appear immediately with a
 
 ---
 
-## Step 6 — Configure GoHighLevel webhook
+## Step 6 — Configure GoHighLevel webhooks
 
-1. In **Ivorey (GoHighLevel)**, go to the **Holistic Well Woman Care - Virtual** form settings.
-2. Find **Webhooks** or **Integrations → Webhook**.
-3. Set the webhook URL to:
-   ```
-   https://your-railway-url.up.railway.app/webhook
-   ```
-4. Set the method to **POST**.
-5. Save.
+Set up three separate webhooks in Ivorey, all pointing to your Railway URL:
 
-To verify it's working, submit a test entry in the form and check your Google Calendar.
+**New inquiry form (Holistic Well Woman Care - Virtual):**
+- URL: `https://your-railway-url.up.railway.app/webhook`
+- Method: POST
+
+**HTMA payment complete:**
+- URL: `https://your-railway-url.up.railway.app/webhook/htma-payment`
+- Method: POST
+- Make sure the payload includes `"service": "htma"` and `"contact": {"name": "..."}` (map the contact name field from GHL)
+
+**3 or 6 month follow-up:**
+- URL: `https://your-railway-url.up.railway.app/webhook/htma-followup`
+- Method: POST
+- Payload must include `"months": 3` or `"months": 6` and `"contact": {"name": "..."}`
+
+The Gmail watcher for Trace Elements emails runs automatically in the background — no GHL setup needed for that one.
 
 ---
 
@@ -140,8 +175,9 @@ The server will reject any request that doesn't include the matching header.
 
 | File | Purpose |
 |------|---------|
-| `index.js` | Express server — receives webhook, creates Calendar event |
+| `index.js` | Express server — webhooks, Gmail watcher, Calendar event creation |
 | `auth.js` | One-time local script to generate the OAuth refresh token |
+| `processed-emails.json` | Auto-created at runtime; tracks TEI emails already acted on |
 | `railway.toml` | Railway deployment config |
 | `.env.example` | Template for your environment variables |
 
